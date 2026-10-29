@@ -88,18 +88,18 @@ impl Parser {
 
     fn statement_inner(&mut self) -> Parsed<Stmt> {
         // spec 3.1: pick the statement by its leading token.
-        // TEMPORARY: if / while / return are written in their own steps. Named rather than
-        //            misreported, so an `if` says what it is instead of failing as a broken
-        //            expression.
-        if self.check(TokenType::If)
-            || self.check(TokenType::While)
-            || self.check(TokenType::Return)
-        {
+        // TEMPORARY: return is written in its own step. Named rather than misreported.
+        if self.check(TokenType::Return) {
             self.error("This statement form is not written yet.");
             return Err(());
         }
-        if self.matches(&[TokenType::LBrace]) {
-            // ASSUMED: Stmt::Block { stmts, locals }; locals is filled in by a later pass.
+        // if and while are keywords and cannot begin an expression, so these arms come
+        // before print and the expression statement. No two arms match the same token.
+        if self.matches(&[TokenType::If]) {
+            self.if_statement()
+        } else if self.matches(&[TokenType::While]) {
+            self.while_statement()
+        } else if self.matches(&[TokenType::LBrace]) {
             let stmts = self.block()?;
             Ok(Stmt::Block { body: stmts, locals: 0 })
         } else if self.matches(&[TokenType::Print]) {
@@ -119,14 +119,34 @@ impl Parser {
     }
 
     fn if_statement(&mut self) -> Parsed<Stmt> {
-        // TODO(you): spec 3.1. The dangling else binds to the nearest unmatched if , the
-        //            recursion decides that, not the grammar.
-        todo!("if_statement")
+        // spec 3.1: 'if' '(' expression ')' statement ( 'else' statement )?
+        // ('if' already matched)
+        self.consume(TokenType::LParen, "Expect '(' after 'if'.")?;
+        let condition = self.expression()?;
+        self.consume(TokenType::RParen, "Expect ')' after if condition.")?;
+        // statement(), not block(): the body of an if is any statement.
+        let then_branch = Box::new(self.statement()?);
+        // The else is taken the moment it is seen. Whichever `if` is running when the
+        // `else` token arrives takes it, which is the nearest unmatched if.
+        let else_branch = if self.matches(&[TokenType::Else]) {
+            Some(Box::new(self.statement()?))
+        } else {
+            None
+        };
+        Ok(Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
     }
 
     fn while_statement(&mut self) -> Parsed<Stmt> {
-        // TODO(you): spec 3.1: 'while' '(' expression ')' statement
-        todo!("while_statement")
+        // spec 3.1: 'while' '(' expression ')' statement   ('while' already matched)
+        self.consume(TokenType::LParen, "Expect '(' after 'while'.")?;
+        let condition = self.expression()?;
+        self.consume(TokenType::RParen, "Expect ')' after while condition.")?;
+        let body = Box::new(self.statement()?);
+        Ok(Stmt::While { condition, body })
     }
 
     /// The `{` is already consumed. Declarations, not statements: a block is where a
