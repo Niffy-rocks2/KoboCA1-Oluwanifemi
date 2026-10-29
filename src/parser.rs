@@ -45,11 +45,13 @@ impl Parser {
     // --- declarations and statements ------------------------------------------------
 
     fn declaration(&mut self) -> Parsed<Stmt> {
-        // TODO(you): spec 3.1: a declaration is a fun, a var, or a statement. This is also
-        //            where an error is caught and synchronise() runs.
-        // TEMPORARY: enough of this rule to let the ones below it run. Replace it in its
-        //            own week; the marking tests for it fail until you do.
-        self.statement()
+        // spec 3.1: declaration -> funDecl | varDecl | statement
+        // (funDecl is added in its own step.)
+        if self.matches(&[TokenType::Var]) {
+            self.var_declaration()
+        } else {
+            self.statement()
+        }
     }
 
     fn fun_declaration(&mut self) -> Parsed<Stmt> {
@@ -59,8 +61,22 @@ impl Parser {
     }
 
     fn var_declaration(&mut self) -> Parsed<Stmt> {
-        // TODO(you): spec 3.1: 'var' name ( '=' expression )? ';'
-        todo!("var_declaration")
+        // spec 3.1: 'var' name ( '=' expression )? ';'   ('var' already matched)
+        let name = self.consume(TokenType::Identifier, "Expect variable name.")?;
+        let initialiser = if self.matches(&[TokenType::Equal]) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration.",
+        )?;
+        Ok(Stmt::Var {
+            name,
+            initialiser,
+            slot: None,
+        })
     }
 
     fn statement(&mut self) -> Parsed<Stmt> {
@@ -71,18 +87,22 @@ impl Parser {
     }
 
     fn statement_inner(&mut self) -> Parsed<Stmt> {
-        // TODO(you): spec 3.1: pick the statement by its leading token.
-        // TEMPORARY: enough of this rule to let the ones below it run. Replace it in its
-        //            own week; the marking tests for it fail until you do.
-        // Named rather than misreported, so an `if` says what it is instead of failing
-        // as a broken expression.
-        if self.check(TokenType::LBrace) || self.check(TokenType::If)
-            || self.check(TokenType::While) || self.check(TokenType::Return)
+        // spec 3.1: pick the statement by its leading token.
+        // TEMPORARY: if / while / return are written in their own steps. Named rather than
+        //            misreported, so an `if` says what it is instead of failing as a broken
+        //            expression.
+        if self.check(TokenType::If)
+            || self.check(TokenType::While)
+            || self.check(TokenType::Return)
         {
             self.error("This statement form is not written yet.");
             return Err(());
         }
-        if self.matches(&[TokenType::Print]) {
+        if self.matches(&[TokenType::LBrace]) {
+            // ASSUMED: Stmt::Block { stmts, locals }; locals is filled in by a later pass.
+            let stmts = self.block()?;
+            Ok(Stmt::Block { body: stmts, locals: 0 })
+        } else if self.matches(&[TokenType::Print]) {
             let value = self.expression()?;
             self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
             Ok(Stmt::Print(value))
@@ -112,8 +132,13 @@ impl Parser {
     /// The `{` is already consumed. Declarations, not statements: a block is where a
     /// `var` most often appears, and the whole point of one is that the name dies at `}`.
     fn block(&mut self) -> Parsed<Vec<Stmt>> {
-        // TODO(you): spec 3.1: '{' declaration* '}'
-        todo!("block")
+        // spec 3.1: '{' declaration* '}'
+        let mut stmts = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.at_end() {
+            stmts.push(self.declaration()?);
+        }
+        self.consume(TokenType::RBrace, "Expect '}' after block.")?;
+        Ok(stmts)
     }
 
     // --- expressions, lowest precedence first --------------------------------------
@@ -135,11 +160,26 @@ impl Parser {
     /// way. So the left side is parsed as an ordinary expression and *then* checked, which
     /// is the standard answer to a rule that is not LL(1).
     fn assignment(&mut self) -> Parsed<Expr> {
-        // TODO(you): spec 3.2. The left side parses as an ordinary expression and is checked
-        //            afterwards, because the rule is not LL(1).
-        // TEMPORARY: enough of this rule to let the ones below it run. Replace it in its
-        //            own week; the marking tests for it fail until you do.
-        self.or()
+        // spec 3.2: assignment -> IDENTIFIER '=' assignment | logic_or
+        let expr = self.or()?;
+        if self.matches(&[TokenType::Equal]) {
+            let equals = self.previous();
+            let value = self.assignment()?; // right-associative: a = b = 3
+            return match expr {
+                Expr::Variable { name, .. } => Ok(Expr::Assign {
+                    name,
+                    value: Box::new(value),
+                    at: Resolved::default(),
+                }),
+                other => {
+                    // Reported, not thrown: the parser knows exactly where it is, so there
+                    // is nothing to recover from.
+                    self.error_at(&equals, "Cannot assign to this expression.");
+                    Ok(other)
+                }
+            };
+        }
+        Ok(expr)
     }
 
     fn or(&mut self) -> Parsed<Expr> {
