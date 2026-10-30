@@ -374,8 +374,16 @@ impl Parser {
             let n = self.previous().lexeme.parse::<f64>().unwrap();
             return Ok(self.literal(Value::Number(n)));
         }
-        // TODO: string literals. The variant names in token.rs / value.rs are not what I
-        //       guessed (TokenType::String and Value::String do not exist). Added next.
+        if self.matches(&[TokenType::Str]) {
+            // The lexeme is the source text, quotes included, so strip the pair.
+            let lex = self.previous().lexeme;
+            let text = lex
+                .strip_prefix('"')
+                .and_then(|x| x.strip_suffix('"'))
+                .unwrap_or(&lex)
+                .to_string();
+            return Ok(self.literal(Value::Str(text)));
+        }
         if self.matches(&[TokenType::True]) {
             return Ok(self.literal(Value::Bool(true)));
         }
