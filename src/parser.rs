@@ -57,13 +57,14 @@ impl Parser {
 
     fn fun_declaration(&mut self) -> Parsed<Stmt> {
         // spec 3.1: 'fun' IDENTIFIER '(' parameters? ')' block   ('fun' already matched)
-        // ASSUMED: Function { name, params, body } and Stmt::Function(index).
+        // Function stores name and params as plain Strings, plus the line of the name.
         let name = self.consume(TokenType::Identifier, "Expect function name.")?;
         self.consume(TokenType::LParen, "Expect '(' after function name.")?;
-        let mut params: Vec<Token> = Vec::new();
+        let mut params: Vec<String> = Vec::new();
         if !self.check(TokenType::RParen) {
             loop {
-                params.push(self.consume(TokenType::Identifier, "Expect parameter name.")?);
+                let p = self.consume(TokenType::Identifier, "Expect parameter name.")?;
+                params.push(p.lexeme);
                 if !self.matches(&[TokenType::Comma]) {
                     break;
                 }
@@ -72,9 +73,20 @@ impl Parser {
         self.consume(TokenType::RParen, "Expect ')' after parameters.")?;
         self.consume(TokenType::LBrace, "Expect '{' before function body.")?;
         let body = self.block()?;
-        self.program.functions.push(Function { name, params, body });
+        // Hoisted: the function goes into Program::functions, and the statement in the
+        // tree only remembers which slot it went into.
+        self.program.functions.push(Function {
+            name: name.lexeme.clone(),
+            params,
+            body,
+            line: name.line,
+        });
         let index = self.program.functions.len() - 1;
-        Ok(Stmt::Function(index))
+        Ok(Stmt::Function {
+            index,
+            name: name.lexeme,
+            slot: None,
+        })
     }
 
     fn var_declaration(&mut self) -> Parsed<Stmt> {
@@ -129,15 +141,13 @@ impl Parser {
 
     fn return_statement(&mut self) -> Parsed<Stmt> {
         // spec 3.1: 'return' expression? ';'   ('return' already matched)
-        // ASSUMED: Stmt::Return { keyword, value }.
-        let keyword = self.previous();
         let value = if !self.check(TokenType::Semicolon) {
             Some(self.expression()?)
         } else {
             None
         };
         self.consume(TokenType::Semicolon, "Expect ';' after return value.")?;
-        Ok(Stmt::Return { keyword, value })
+        Ok(Stmt::Return(value))
     }
 
     fn if_statement(&mut self) -> Parsed<Stmt> {
