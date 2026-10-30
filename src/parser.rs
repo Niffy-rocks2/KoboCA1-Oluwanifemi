@@ -380,14 +380,22 @@ impl Parser {
     /// the parse makes progress; a recovery that could stand still would hang the
     /// compiler on the file that triggered it.
     fn synchronise(&mut self) {
-        // TODO(you): spec 5.2: after an error, discard tokens until just past a ';' or on a
-        //            statement keyword, so one mistake costs one message.
-        // TEMPORARY: enough of this rule to let the ones below it run. Replace it in its
-        //            own week; the marking tests for it fail until you do.
+        // spec 5.2: stop just past a ';' or on fun var if while print return.
         self.depth = 0;
         while !self.at_end() {
-            self.current += 1;
+            self.current += 1; // step first, always: this is what prevents a hang
             if self.previous().kind == TokenType::Semicolon {
+                return;
+            }
+            if matches!(
+                self.peek().kind,
+                TokenType::Fun
+                    | TokenType::Var
+                    | TokenType::If
+                    | TokenType::While
+                    | TokenType::Print
+                    | TokenType::Return
+            ) {
                 return;
             }
         }
