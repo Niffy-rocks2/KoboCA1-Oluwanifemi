@@ -46,8 +46,9 @@ impl Parser {
 
     fn declaration(&mut self) -> Parsed<Stmt> {
         // spec 3.1: declaration -> funDecl | varDecl | statement
-        // (funDecl is added in its own step.)
-        if self.matches(&[TokenType::Var]) {
+        if self.matches(&[TokenType::Fun]) {
+            self.fun_declaration()
+        } else if self.matches(&[TokenType::Var]) {
             self.var_declaration()
         } else {
             self.statement()
@@ -55,9 +56,25 @@ impl Parser {
     }
 
     fn fun_declaration(&mut self) -> Parsed<Stmt> {
-        // TODO(you): spec 3.1: a function declaration, its parameter list, and its body.
-        //            Functions are hoisted into Program::functions.
-        todo!("fun_declaration")
+        // spec 3.1: 'fun' IDENTIFIER '(' parameters? ')' block   ('fun' already matched)
+        // ASSUMED: Function { name, params, body } and Stmt::Function(index).
+        let name = self.consume(TokenType::Identifier, "Expect function name.")?;
+        self.consume(TokenType::LParen, "Expect '(' after function name.")?;
+        let mut params: Vec<Token> = Vec::new();
+        if !self.check(TokenType::RParen) {
+            loop {
+                params.push(self.consume(TokenType::Identifier, "Expect parameter name.")?);
+                if !self.matches(&[TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RParen, "Expect ')' after parameters.")?;
+        self.consume(TokenType::LBrace, "Expect '{' before function body.")?;
+        let body = self.block()?;
+        self.program.functions.push(Function { name, params, body });
+        let index = self.program.functions.len() - 1;
+        Ok(Stmt::Function(index))
     }
 
     fn var_declaration(&mut self) -> Parsed<Stmt> {
@@ -88,17 +105,14 @@ impl Parser {
 
     fn statement_inner(&mut self) -> Parsed<Stmt> {
         // spec 3.1: pick the statement by its leading token.
-        // TEMPORARY: return is written in its own step. Named rather than misreported.
-        if self.check(TokenType::Return) {
-            self.error("This statement form is not written yet.");
-            return Err(());
-        }
-        // if and while are keywords and cannot begin an expression, so these arms come
-        // before print and the expression statement. No two arms match the same token.
+        // Keywords cannot begin an expression, so these arms come before print and the
+        // expression statement. No two arms match the same token.
         if self.matches(&[TokenType::If]) {
             self.if_statement()
         } else if self.matches(&[TokenType::While]) {
             self.while_statement()
+        } else if self.matches(&[TokenType::Return]) {
+            self.return_statement()
         } else if self.matches(&[TokenType::LBrace]) {
             let stmts = self.block()?;
             Ok(Stmt::Block { body: stmts, locals: 0 })
@@ -114,8 +128,16 @@ impl Parser {
     }
 
     fn return_statement(&mut self) -> Parsed<Stmt> {
-        // TODO(you): spec 3.1: 'return' expression? ';'
-        todo!("return_statement")
+        // spec 3.1: 'return' expression? ';'   ('return' already matched)
+        // ASSUMED: Stmt::Return { keyword, value }.
+        let keyword = self.previous();
+        let value = if !self.check(TokenType::Semicolon) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+        self.consume(TokenType::Semicolon, "Expect ';' after return value.")?;
+        Ok(Stmt::Return { keyword, value })
     }
 
     fn if_statement(&mut self) -> Parsed<Stmt> {
