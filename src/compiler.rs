@@ -71,8 +71,91 @@ impl<'a> Compiler<'a> {
     // --- statements -------------------------------------------------------------------
 
     fn statement(&mut self, stmt: &Stmt) {
-        // TODO(you): emit code for one statement.
-        todo!("statement")
+        match stmt {
+            // Every expression statement ends with a Pop: the value is not wanted.
+            Stmt::Expression(e) => {
+                let line = self.expression(e);
+                self.chunk.write(Op::Pop, line);
+            }
+
+            Stmt::Print(e) => {
+                let line = self.expression(e);
+                self.chunk.write(Op::Print, line);
+            }
+
+            Stmt::Var {
+                name,
+                initialiser,
+                slot,
+            } => {
+                // The value is pushed either way: a `var` with no initialiser holds nil.
+                if let Some(e) = initialiser {
+                    self.expression(e);
+                } else {
+                    self.chunk.write(Op::Nil, name.line);
+                }
+                self.declare(&name.lexeme, *slot, name.line);
+            }
+
+            Stmt::Block { body, locals } => {
+                self.statements(body);
+                self.end_scope(*locals);
+            }
+
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let line = self.expression(condition);
+                // JumpIfFalse leaves the condition on the stack, so both paths pop it.
+                let to_else = self.chunk.write(Op::JumpIfFalse(0), line);
+                self.chunk.write(Op::Pop, line);
+                self.statement(then_branch);
+                let to_end = self.chunk.write(Op::Jump(0), line);
+                self.patch(to_else);
+                self.chunk.write(Op::Pop, line);
+                if let Some(alt) = else_branch {
+                    self.statement(alt);
+                }
+                self.patch(to_end);
+            }
+
+            Stmt::While { condition, body } => {
+                let start = self.chunk.code.len();
+                let line = self.expression(condition);
+                let to_exit = self.chunk.write(Op::JumpIfFalse(0), line);
+                self.chunk.write(Op::Pop, line);
+                self.statement(body);
+                // A backward jump: its target is already known, so nothing to patch.
+                self.chunk.write(Op::Jump(start), line);
+                self.patch(to_exit);
+                self.chunk.write(Op::Pop, line);
+            }
+
+            // The function value goes on the stack like any other initialiser would.
+            Stmt::Function { index, name, slot } => {
+                let line = self.program.functions[*index].line;
+                let c = self.chunk.constant(Value::Function {
+                    index: *index,
+                    name: name.clone(),
+                });
+                self.chunk.write(Op::Constant(c), line);
+                self.declare(name, *slot, line);
+            }
+
+            Stmt::Return(value) => {
+                let line = match value {
+                    Some(e) => self.expression(e),
+                    None => {
+                        let line = self.chunk.last_line();
+                        self.chunk.write(Op::Nil, line);
+                        line
+                    }
+                };
+                self.chunk.write(Op::Return, line);
+            }
+        }
     }
 
     // --- expressions ------------------------------------------------------------------
@@ -80,8 +163,109 @@ impl<'a> Compiler<'a> {
     /// Emits the code for `expr` and returns the line the caller should attribute its own
     /// follow-up instruction to.
     fn expression(&mut self, expr: &Expr) -> usize {
-        // TODO(you): emit code for one expression, and return the line it came from.
-        todo!("expression")
+        match expr {
+            Expr::Literal { value, line } => {
+                match value {
+                    Value::Nil => self.chunk.write(Op::Nil, *line),
+                    Value::Bool(true) => self.chunk.write(Op::True, *line),
+                    Value::Bool(false) => self.chunk.write(Op::False, *line),
+                    other => {
+                        let c = self.chunk.constant(other.clone());
+                        self.chunk.write(Op::Constant(c), *line)
+                    }
+                };
+                *line
+            }
+
+            Expr::Grouping(inner) => self.expression(inner),
+
+            Expr::Variable { name, at } => {
+                match at {
+                    Resolved::Local { slot, .. } => self.chunk.write(Op::GetLocal(*slot), name.line),
+                    Resolved::Global => {
+                        let c = self.name_constant(&name.lexeme);
+                        self.chunk.write(Op::GetGlobal(c), name.line)
+                    }
+                };
+                name.line
+            }
+
+            // Assignment is an expression: Set* leaves the value on the stack.
+            Expr::Assign { name, value, at } => {
+                self.expression(value);
+                match at {
+                    Resolved::Local { slot, .. } => self.chunk.write(Op::SetLocal(*slot), name.line),
+                    Resolved::Global => {
+                        let c = self.name_constant(&name.lexeme);
+                        self.chunk.write(Op::SetGlobal(c), name.line)
+                    }
+                };
+                name.line
+            }
+
+            Expr::Unary { op, right } => {
+                self.expression(right);
+                match op.kind {
+                    TokenType::Minus => self.chunk.write(Op::Negate, op.line),
+                    _ => self.chunk.write(Op::Not, op.line),
+                };
+                op.line
+            }
+
+            Expr::Binary { left, op, right } => {
+                self.expression(left);
+                self.expression(right);
+                let code = match op.kind {
+                    TokenType::Plus => Op::Add,
+                    TokenType::Minus => Op::Subtract,
+                    TokenType::Star => Op::Multiply,
+                    TokenType::Slash => Op::Divide,
+                    TokenType::Greater => Op::Greater,
+                    TokenType::GreaterEqual => Op::GreaterEqual,
+                    TokenType::Less => Op::Less,
+                    TokenType::LessEqual => Op::LessEqual,
+                    TokenType::EqualEqual => Op::Equal,
+                    _ => Op::NotEqual,
+                };
+                self.chunk.write(code, op.line);
+                op.line
+            }
+
+            // `and` / `or` keep the left operand if it settles the answer, so the value
+            // has to survive the test: that is why JumpIfFalse does not pop.
+            Expr::Logical { left, op, right } => {
+                self.expression(left);
+                if op.kind == TokenType::And {
+                    let end = self.chunk.write(Op::JumpIfFalse(0), op.line);
+                    self.chunk.write(Op::Pop, op.line);
+                    self.expression(right);
+                    self.patch(end);
+                } else {
+                    let to_right = self.chunk.write(Op::JumpIfFalse(0), op.line);
+                    let end = self.chunk.write(Op::Jump(0), op.line);
+                    self.patch(to_right);
+                    self.chunk.write(Op::Pop, op.line);
+                    self.expression(right);
+                    self.patch(end);
+                }
+                op.line
+            }
+
+            // Callee, then the arguments in order, then the call: the callee sits under
+            // its arguments, which is exactly what the VM expects.
+            Expr::Call {
+                callee,
+                paren,
+                args,
+            } => {
+                self.expression(callee);
+                for a in args {
+                    self.expression(a);
+                }
+                self.chunk.write(Op::Call(args.len()), paren.line);
+                paren.line
+            }
+        }
     }
 
     // --- names ------------------------------------------------------------------------
@@ -94,9 +278,12 @@ impl<'a> Compiler<'a> {
     /// resolver's answer and `in_function` is the one case it cannot express on its own:
     /// the script's outermost declarations are globals and a function body's are not.
     fn declare(&mut self, name: &str, slot: Option<usize>, line: usize) {
-        // TODO(you): a global is written into the globals map; a local is already on the stack
-        //            in the slot resolver.rs gave it, so it emits nothing.
-        todo!("declare")
+        // A global is written into the globals map. A local needs no instruction: the
+        // value just pushed already sits in the slot the resolver gave it.
+        if slot.is_none() {
+            let c = self.name_constant(name);
+            self.chunk.write(Op::DefineGlobal(c), line);
+        }
     }
 
     fn name_constant(&mut self, name: &str) -> usize {
@@ -108,13 +295,18 @@ impl<'a> Compiler<'a> {
     /// work it out a second time. The interpreter dropped a whole `HashMap` here; the VM
     /// adjusts a stack pointer.
     fn end_scope(&mut self, locals: usize) {
-        // TODO(you): leave a scope: one Pop per local that dies here, and the resolver already
-        //            counted them onto the Block.
-        todo!("end_scope")
+        let line = self.chunk.last_line();
+        for _ in 0..locals {
+            self.chunk.write(Op::Pop, line);
+        }
     }
 
     fn patch(&mut self, at: usize) {
-        // TODO(you): fill in a forward jump, whose target was not known when it was emitted.
-        todo!("patch")
+        // The jump lands on the next instruction to be written, which is here.
+        let target = self.chunk.code.len();
+        match &mut self.chunk.code[at] {
+            Op::Jump(t) | Op::JumpIfFalse(t) => *t = target,
+            _ => panic!("patch called on an instruction that is not a jump"),
+        }
     }
 }
