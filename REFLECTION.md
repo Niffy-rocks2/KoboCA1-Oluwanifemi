@@ -1,18 +1,49 @@
-# CA2 Reflection
+# CA3 Reflection — Compiler Construction
 
-## 1. The dangling else
+## Question 1: Short-Circuit Evaluation
 
-The dangling else is resolved by `src/parser.rs:160` and `src/parser.rs:163`. At line 160, `if_statement` parses its body with `self.statement()`, which can itself be an `if`, and that inner call runs to completion before control comes back. At line 163, `self.matches(&[TokenType::Else])` consumes an `else` the moment it is the next token. So when the `else` arrives, the inner `if` is the function that is running, and it takes it. The grammar cannot say this, because `if (c) stmt ( else stmt )?` is ambiguous on its own; it is the order of the calls plus eager matching that decide it. For `if (false) if (true) print "a"; else print "b";` my parser prints `(if false (if true (print "a") (print "b")))`. If the `else` bound to the outer `if`, it would print `(if false (if true (print "a")) (print "b"))`, and the program would behave differently: with a false condition it would print "b".
+Short-circuit evaluation allows logical expressions to return a result without unnecessarily evaluating both operands. The implementation in `src/interpreter.rs:179` handles logical expressions, while lines `src/interpreter.rs:182` and `src/interpreter.rs:183` determine whether evaluation should stop based on the logical operator and the truthiness of the left operand.
 
-## 2. Assignment
+For the expression `nil or "fallback"`, nil is falsey, so the interpreter evaluates the right operand and returns the string `"fallback"`.
 
-The check is at `src/parser.rs:220`, where `match expr` tests whether the left side turned out to be an `Expr::Variable`. Line 216 first parses the left side as an ordinary expression with `self.or()`. The check cannot happen earlier, because when the parser reads `a` it cannot tell whether it is the start of an assignment (`a = 1`) or just an expression (`a + 1`, `f(a)`). They begin with the same token, and one token of lookahead does not separate them. Only after the whole left side is built, and an `=` follows, can I look at what I built. That is why assignment is not LL(1). If it is not a variable, line 229 reports the error and returns the left side instead of failing, since the parser has not lost its place. For `1 = 2;` the message from section 5.1 is `[line 1] Error at '=': Cannot assign to this expression.`
+For `0 and 1`, zero is truthy in Kobo. Therefore, the interpreter evaluates the right operand and returns the number `1`.
 
-## 3. synchronise
+The important distinction is that logical operators return one of their original operands rather than converting the result into a Boolean. Returning only true or false might pass tests that use logical expressions as conditions. However, it would fail tests that print or store the actual value returned by a logical expression. Short-circuit evaluation also prevents unnecessary operations and unwanted side effects.
 
-`synchronise` starts at `src/parser.rs:422`. It steps over one token first (`src/parser.rs:426`), so it can never stand still and hang. Then it stops in two situations: just past a `;` (`src/parser.rs:427`), because that is where a statement ends, or when the next token is `fun`, `var`, `if`, `while`, `print` or `return` (`src/parser.rs:430`), because those keywords can only begin a declaration or statement. Stopping there means one mistake costs one message instead of a cascade. The test `tests/phase-2/invalid/expect_variable_name.kobo` (`var 123 = 1;`) changes if the call to `synchronise` in `parse` is deleted. The failing `consume` does not advance, so the parser restarts on `123`, reads `123 = 1;` as an assignment, and adds a second line, `[line 1] Error at '=': Cannot assign to this expression.`
+## Question 2: Variable Resolution and Stack Management
 
-## Anchored in my history
+The lookup function in `src/resolver.rs:96` determines which declaration a local variable refers to before the program executes. This allows the bytecode compiler to associate local variables with stack slots.
 
-- **Still wrong:** commit `f48b79f` (29 Oct 2026). `synchronise` could only stop after a semicolon, and that was its only exit: `if self.previous().kind == TokenType::Semicolon {`
-- **Fixed:** commit `3d19e28` (30 Oct 2026). I added the second exit, on the statement keywords: `if matches!(self.peek().kind, TokenType::Fun | TokenType::Var | TokenType::If | TokenType::While | TokenType::Print | TokenType::Return) {`
+Instead of repeatedly searching for a variable by its name, the virtual machine can access the corresponding stack slot directly. This reduces the work required during execution. The tree-walking interpreter also benefits from resolution because it can identify the appropriate environment depth.
+
+The `end_scope` function in `src/compiler.rs:310` is responsible for removing local variables from the stack when their scope ends.
+
+If the compiler emits one Pop instruction too few, an expired local variable remains on the stack. This can disrupt stack discipline and cause incorrect local variable access during subsequent operations.
+
+According to the assignment brief, the phase-4 suite detects this problem through tests such as `jumps_while.kobo`, whereas the phase-3 marking programs do not expose that particular VM defect.
+
+## Question 3: Conditional Expression Extension
+
+The extension is the conditional expression, written as `condition ? a : b`. It evaluates the condition and executes only the selected branch.
+
+The implementation affects the following source locations:
+
+- `src/token.rs:12–13` and `src/token.rs:61–62` — conditional tokens.
+- `src/scanner.rs:53–54` — recognition of the new symbols.
+- `src/ast.rs:92` — conditional expression node.
+- `src/parser.rs:216` and `src/parser.rs:237–254` — precedence and right-associativity.
+- `src/printer.rs:88` — expression representation.
+- `src/resolver.rs:192` — variable resolution.
+- `src/interpreter.rs:169` — conditional evaluation.
+- `src/compiler.rs:234` — bytecode generation.
+
+The bytecode implementation is more complicated because it requires conditional jumps, jump patching and correct stack management. Both execution paths must remove the condition and leave exactly one result. The existing VM instruction at `src/vm.rs:147` supports conditional jumps without requiring a new instruction.
+
+The extension was implemented with AI assistance and tested locally on both execution engines. All five extension tests passed on each engine.
+
+### Development History
+
+- `f3605c5` — core VM implementation.
+- `faf1090` — conditional expression implementation and golden tests.
+
+The available commit history does not contain a separate incorrect extension implementation followed by its correction. Therefore, I cannot provide a verified before-and-after correction for this requirement.
