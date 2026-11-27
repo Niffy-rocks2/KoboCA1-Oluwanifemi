@@ -1,0 +1,8 @@
+{
+var a = 10;
+var b = 20;
+var result = a < b ? a : b;
+print result; // expect: 10
+var next = 30;
+print next; // expect: 30
+}

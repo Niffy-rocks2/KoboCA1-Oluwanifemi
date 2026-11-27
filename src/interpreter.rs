@@ -166,6 +166,14 @@ fn evaluate(expr: &Expr, env: &mut Environment, program: &Program) -> Exec<Value
             }
         }
 
+        Expr::Conditional { condition, then_branch, else_branch, .. } => {
+            if evaluate(condition, env, program)?.is_truthy() {
+                evaluate(then_branch, env, program)
+            } else {
+                evaluate(else_branch, env, program)
+            }
+        }
+
         // `and` / `or` evaluate to one of their operands, not to a boolean, and the right
         // side runs only if the left did not already settle it (spec 4.1).
         Expr::Logical { left, op, right } => {

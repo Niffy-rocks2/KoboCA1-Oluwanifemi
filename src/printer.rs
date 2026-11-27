@@ -85,6 +85,9 @@ fn expression(expr: &Expr) -> String {
             format!("(call {}{})", expression(callee), rendered)
         }
         Expr::Unary { op, right } => format!("({} {})", op.lexeme, expression(right)),
+        Expr::Conditional { condition, then_branch, else_branch, .. } => {
+            format!("(?: {} {} {})", expression(condition), expression(then_branch), expression(else_branch))
+        }
         Expr::Binary { left, op, right } | Expr::Logical { left, op, right } => {
             format!("({} {} {})", op.lexeme, expression(left), expression(right))
         }

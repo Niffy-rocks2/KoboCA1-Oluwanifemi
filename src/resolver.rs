@@ -189,6 +189,11 @@ impl Resolver {
 
             Expr::Unary { right, .. } => self.expression(right),
 
+            Expr::Conditional { condition, then_branch, else_branch, .. } => {
+                self.expression(condition);
+                self.expression(then_branch);
+                self.expression(else_branch);
+            }
             Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
                 self.expression(left);
                 self.expression(right);

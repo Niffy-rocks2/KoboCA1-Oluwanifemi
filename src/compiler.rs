@@ -231,6 +231,19 @@ impl<'a> Compiler<'a> {
                 op.line
             }
 
+            Expr::Conditional { condition, then_branch, else_branch, line } => {
+                self.expression(condition);
+                let to_else = self.chunk.write(Op::JumpIfFalse(0), *line);
+                self.chunk.write(Op::Pop, *line);
+                self.expression(then_branch);
+                let to_end = self.chunk.write(Op::Jump(0), *line);
+                self.patch(to_else);
+                self.chunk.write(Op::Pop, *line);
+                self.expression(else_branch);
+                self.patch(to_end);
+                *line
+            }
+
             // `and` / `or` keep the left operand if it settles the answer, so the value
             // has to survive the test: that is why JumpIfFalse does not pop.
             Expr::Logical { left, op, right } => {

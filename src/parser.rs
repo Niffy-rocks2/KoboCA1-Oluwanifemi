@@ -213,7 +213,7 @@ impl Parser {
     /// is the standard answer to a rule that is not LL(1).
     fn assignment(&mut self) -> Parsed<Expr> {
         // spec 3.2: assignment -> IDENTIFIER '=' assignment | logic_or
-        let expr = self.or()?;
+        let expr = self.conditional()?;
         if self.matches(&[TokenType::Equal]) {
             let equals = self.previous();
             let value = self.assignment()?; // right-associative: a = b = 3
@@ -232,6 +232,31 @@ impl Parser {
             };
         }
         Ok(expr)
+    }
+
+    fn conditional(&mut self) -> Parsed<Expr> {
+        let condition = self.or()?;
+        if !self.matches(&[TokenType::Question]) {
+            return Ok(condition);
+        }
+        let line = self.previous().line;
+        let then_branch = self.expression()?;
+        self.consume(TokenType::Colon, "Expect ':' after conditional branch.")?;
+        self.depth += 1;
+        let result = if self.depth > MAX_NESTING {
+            self.error("Too deeply nested.");
+            Err(())
+        } else {
+            self.conditional()
+        };
+        self.depth -= 1;
+        let else_branch = result?;
+        Ok(Expr::Conditional {
+            condition: Box::new(condition),
+            then_branch: Box::new(then_branch),
+            else_branch: Box::new(else_branch),
+            line,
+        })
     }
 
     fn or(&mut self) -> Parsed<Expr> {

@@ -1,0 +1,5 @@
+print true or false ? 10 : 20; // expect: 10
+print false and true ? 10 : 20; // expect: 20
+var result = 0;
+result = false ? 5 : 9;
+print result; // expect: 9

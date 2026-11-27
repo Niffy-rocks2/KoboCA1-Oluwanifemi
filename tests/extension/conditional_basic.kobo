@@ -1,0 +1,4 @@
+print true ? 10 : 20; // expect: 10
+print false ? 10 : 20; // expect: 20
+print nil ? 10 : 20; // expect: 20
+print 0 ? 10 : 20; // expect: 10

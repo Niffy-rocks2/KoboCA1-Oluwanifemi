@@ -89,6 +89,12 @@ pub enum Expr {
         op: Token,
         right: Box<Expr>,
     },
+    Conditional {
+        condition: Box<Expr>,
+        then_branch: Box<Expr>,
+        else_branch: Box<Expr>,
+        line: usize,
+    },
 }
 
 #[derive(Debug)]

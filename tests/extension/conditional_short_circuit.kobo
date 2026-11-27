@@ -1,0 +1,2 @@
+print true ? 100 : 1 / 0; // expect: 100
+print false ? 1 / 0 : 200; // expect: 200

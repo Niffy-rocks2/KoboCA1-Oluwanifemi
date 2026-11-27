@@ -1,4 +1,4 @@
-// GIVEN, do not edit. This file is part of the compiler you are handed, not the
+    // GIVEN, do not edit. This file is part of the compiler you are handed, not the
 // compiler you write. Read it anyway: what you write has to fit it.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9,6 +9,8 @@ pub enum TokenType {
     RBrace,
     Comma,
     Semicolon,
+    Question,
+    Colon,
 
     Plus,
     Minus,
@@ -27,8 +29,8 @@ pub enum TokenType {
     Identifier,
     Str,
     Number,
-
-    And,
+    
+     And,
     Else,
     False,
     Fun,
@@ -56,6 +58,8 @@ impl TokenType {
             TokenType::RBrace => "RBRACE",
             TokenType::Comma => "COMMA",
             TokenType::Semicolon => "SEMICOLON",
+            TokenType::Question => "QUESTION",
+            TokenType::Colon => "COLON",
 
             TokenType::Plus => "PLUS",
             TokenType::Minus => "MINUS",

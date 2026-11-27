@@ -50,6 +50,8 @@ impl Scanner {
             '}' => self.add(TokenType::RBrace),
             ',' => self.add(TokenType::Comma),
             ';' => self.add(TokenType::Semicolon),
+            '?' => self.add(TokenType::Question),
+            ':' => self.add(TokenType::Colon),
             '+' => self.add(TokenType::Plus),
             '-' => self.add(TokenType::Minus),
             '*' => self.add(TokenType::Star),
